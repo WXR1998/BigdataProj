@@ -6,6 +6,8 @@
 
 int main(){
     KVStore kvs;
-    kvs.DaemonKeyMappingFileInit();
+    // kvs.DaemonKeyMappingFileInit();
+    // kvs.DaemonDataFileInit();
+    kvs.DropDatabase();
     return 0;
 }
