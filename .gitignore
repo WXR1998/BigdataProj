@@ -33,3 +33,6 @@
 
 bin/
 data/
+*.pdf
+.vscode/
+__pycache__/

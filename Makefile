@@ -1,4 +1,4 @@
-gpp = g++-6
+gpp = g++
 prom = kvdb
 deps = $(shell find ./src -name "*.hpp")
 src = $(shell find ./src -name "*.cpp" ! -name "generator.cpp")

@@ -16,9 +16,12 @@ KV Nosql数据库，支持CRUD，数据落盘，ACID特性，可并发执行
 
 ## 落盘文件格式
 
-### key_mapping.txt
-    key_count
-    key start_byte del_flag
+### key_mapping.db
+    4 key_count
+    8 + L 
+        L key 
+        4 start_byte 
+        4 del_flag
     ... ... ...
 
 记录key在数据文件的第几字节开始(每个value是4个字节)，32个bit。

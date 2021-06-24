@@ -19,10 +19,10 @@ union IntValueUnion{
 struct KeyInfo{
     std::string key;
     int start_byte;
-    int row_num;
+    int key_mapping_start_byte;
     KeyState del_flag;
     KeyInfo();
-    KeyInfo(std::string key, int start_byte, int row_num, KeyState del_flag);
+    KeyInfo(std::string key, int start_byte, int key_mapping_start_byte, KeyState del_flag);
     void print();
 };
 
@@ -69,10 +69,10 @@ public:
     void DropDatabase();
 
     // 以下操作方法都需要传入need_lock
-    void Update(std::string key, int value, KeyState state, bool need_lock);
-    bool Add1(std::string key, bool need_lock);
-    bool Delete(std::string key, bool need_lock);
-    std::pair<KeyState, int> Get(std::string key, bool need_lock);
+    void Update(std::string key, int value, KeyState state, bool need_lock=true);
+    bool Add1(std::string key, bool need_lock=true);
+    bool Delete(std::string key, bool need_lock=true);
+    std::pair<KeyState, int> Get(std::string key, bool need_lock=true);
     void StartTrans();
     void CommitTrans();
     void AbortTrans();

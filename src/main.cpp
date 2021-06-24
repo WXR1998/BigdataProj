@@ -1,13 +1,5 @@
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-
-#include "kvstore.hpp"
+#include "server.hpp"
 
 int main(){
-    KVStore kvs;
-    // kvs.DaemonKeyMappingFileInit();
-    // kvs.DaemonDataFileInit();
-    kvs.DropDatabase();
-    return 0;
+    server();
 }

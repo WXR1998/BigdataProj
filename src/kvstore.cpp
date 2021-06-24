@@ -4,6 +4,7 @@
 #include <string>
 #include <cstdlib>
 #include <cassert>
+#include <cstring>
 
 #include "kvstore.hpp"
 #include "config.hpp"
@@ -13,8 +14,8 @@ KeyInfo::KeyInfo(){
     start_byte = -1;
     del_flag = KeyState::DELETE;
 }
-KeyInfo::KeyInfo(std::string key, int start_byte, int row_num, KeyState del_flag):
-    key(key), start_byte(start_byte), row_num(row_num), del_flag(del_flag){
+KeyInfo::KeyInfo(std::string key, int start_byte, int key_mapping_start_byte, KeyState del_flag):
+    key(key), start_byte(start_byte), key_mapping_start_byte(key_mapping_start_byte), del_flag(del_flag){
 }
 void KeyInfo::print(){
     printf("Key: %s, start byte: %d, del flag: %d\n", key.c_str(), start_byte, del_flag);
@@ -59,31 +60,33 @@ void KVStore::DaemonDataFileInit(){
             IntValueUnion vu;
             fread(vu.c, sizeof(IntValueUnion), 1, data_handle);
             kvs[key] = KV(key, vu.value, kv.second.del_flag);
-            printf("%s: %d\n", key.c_str(), vu.value);
+            printf("Loaded %s: %d\n", key.c_str(), vu.value);
         }
-    }else{
+        printf("\n");
+    }else
         data_handle = fopen(data_path, "wb+");
-        // IntValueUnion vu;
-        // vu.value = 123214;
-        // fwrite(vu.c, sizeof(IntValueUnion), 1, data_handle);
-    }
 }
 void KVStore::DaemonKeyMappingFileInit(){
-    char s[256];
+    char s[max_key_length];
+    IntValueUnion vu;
     if (access(key_mapping_path, 0) == 0){
-        key_mapping_handle = fopen(key_mapping_path, "r+");
-        fscanf(key_mapping_handle, "%d", &key_count);
+        key_mapping_handle = fopen(key_mapping_path, "rb+");
+        fread(vu.c, sizeof(IntValueUnion), 1, key_mapping_handle);
+        key_count = vu.value;
         for (int i = 0; i < key_count; ++i){
             int start_byte; 
             KeyState del_flag;
-            fscanf(key_mapping_handle, "%s%d%d", s, &start_byte, &del_flag);
-            key_info[std::string(s)] = KeyInfo(std::string(s), start_byte, i+1, del_flag);
+            fread(s, sizeof(char), max_key_length, key_mapping_handle);
+            fread(vu.c, sizeof(IntValueUnion), 1, key_mapping_handle);
+            start_byte = vu.value;
+            fread(vu.c, sizeof(IntValueUnion), 1, key_mapping_handle);
+            del_flag = KeyState(vu.value);
+            key_info[std::string(s)] = KeyInfo(std::string(s), start_byte, sizeof(int) + i * (sizeof(int)*2 + max_key_length), del_flag);
         }
-        for (auto i: key_info)
-            i.second.print();
     }else{
-        key_mapping_handle = fopen(key_mapping_path, "w+");
-        fprintf(key_mapping_handle, "%d\n", key_count = 0);
+        key_mapping_handle = fopen(key_mapping_path, "wb+");
+        vu.value = key_count = 0;
+        fwrite(vu.c, sizeof(IntValueUnion), 1, key_mapping_handle);
     }
 }
 void KVStore::DropDatabase(){
@@ -96,12 +99,53 @@ void KVStore::DropDatabase(){
     kvs.clear();
 }
 void KVStore::ModifyKey(std::string key, KeyState del_flag){
+    IntValueUnion vu;
+    char s[max_key_length] = {};
     if (key_info.find(key) != key_info.end()){
-        // TODO
+        if (key_info[key].del_flag == del_flag)
+            return;
+        key_info[key].del_flag = del_flag;
+        fseek(key_mapping_handle, key_info[key].key_mapping_start_byte + max_key_length + sizeof(int), SEEK_SET);
+        vu.value = del_flag;
+        fwrite(vu.c, sizeof(IntValueUnion), 1, key_mapping_handle);
     }else{
-        // TODO 新增一行
+        key_info[key] = KeyInfo(key, 
+            sizeof(int) * key_count, 
+            sizeof(int) + key_count * (sizeof(int)*2 + max_key_length), 
+            del_flag);
+        // 定位到这个key的信息处
+        fseek(key_mapping_handle, sizeof(int) + key_count * (sizeof(int)*2 + max_key_length), SEEK_SET);
 
+        strcpy(s, key.c_str());
+        fwrite(s, sizeof(char), max_key_length, key_mapping_handle);
+
+        vu.value = sizeof(int) * key_count;
+        fwrite(vu.c, sizeof(IntValueUnion), 1, key_mapping_handle);
+
+        vu.value = del_flag;
+        fwrite(vu.c, sizeof(IntValueUnion), 1, key_mapping_handle);
+
+        // 为这个新key的值加一个空位
+        vu.value = 0;
+        fseek(data_handle, sizeof(int) * key_count, SEEK_SET);
+        fwrite(vu.c, sizeof(IntValueUnion), 1, data_handle);
+
+        // 定位到文件头，key的数量
+        fseek(key_mapping_handle, 0, SEEK_SET);
+        vu.value = ++key_count;
+        fwrite(vu.c, sizeof(IntValueUnion), 1, key_mapping_handle);
     }
+    fflush(key_mapping_handle);
+    fflush(data_handle);
+}
+void KVStore::ModifyData(std::string key, int value){
+    if (key_info.find(key) == key_info.end())
+        return;
+    IntValueUnion vu;
+    fseek(data_handle, key_info[key].start_byte, SEEK_SET);
+    vu.value = value;
+    fwrite(vu.c, sizeof(IntValueUnion), 1, data_handle);
+    fflush(data_handle);
 }
 
 void KVStore::Update(std::string key, int value, KeyState state, bool need_lock){
@@ -109,7 +153,10 @@ void KVStore::Update(std::string key, int value, KeyState state, bool need_lock)
         lock.lock();
     std::pair<KeyState, int> current_value = Get(key, false);
     kvs[key] = KV(key, value, state);
-    // TODO 落盘
+
+    ModifyKey(key, state);
+    ModifyData(key, value);
+
     if (need_lock)
         lock.unlock();
     else{   // 不需要锁，说明这个update操作是在一个Trans内部，需要记录日志以备还原
@@ -170,7 +217,8 @@ void KVStore::AbortTrans(){
         assert(kvs[l.key].del_flag == l.to_del_flag);
         assert(kvs[l.key].value == l.to_value);
         kvs[l.key] = KV(l.key, l.fr_value, l.fr_del_flag);
-        // TODO 落盘
+        ModifyKey(l.key, l.fr_del_flag);
+        ModifyData(l.key, l.fr_value);
     }
     lock.unlock();
 }
